@@ -1,49 +1,37 @@
-#!/bin/bash 
+#!/bin/bash
 
-export HUGGING_FACE_HUB_TOKEN=$(cat $TOKEN_FILE)
-echo "The md5 of token is $(md5sum $TOKEN_FILE)"
-mkdir -p /home/datascience/.cache/huggingface
-cp $TOKEN_FILE /home/datascience/.cache/huggingface/token
-echo "Copied token file to /home/datascience/.cache/huggingface, $(md5sum /home/datascience/.cache/huggingface/token)"
-
-echo "Set HuggingFace cache folder..."
-export HUGGINGFACE_HUB_CACHE=/home/datascience/.cache
-
-echo "Set new tmp/ folder"
-mkdir -p /home/datascience/tmp
-export TMPDIR=/home/datascience/tmp
-
-#echo $(du -sh /home/datascience/*)
-echo "The size of partitions"
-#echo $(df -h /home/datascience)
-df -h
-#echo $(du -sh /home/datascience)
-
-echo "Checking internet connection: "
-
-printenv
-
-curl -sI -v https://www.wikipedia.org
-
-echo $(du -sh /home/datascience/*)
-
-# echo "starting nginx server and vllm"
-# nginx -p $PWD && \
-# source activate vllm && \
-# WEB_CONCURRENCY=1 python $VLLM_DIR/vllm-api-server.py --port 80 --host 0.0.0.0 --log-config $VLLM_DIR/vllm-log-config.yaml $PARAMS
-
-echo "Check if Nginx is running"
-if pgrep -x "nginx" > /dev/null
-then
-    echo "Stopping Nginx..."
-    nginx -s stop
+if [[ -z "${MODEL_DEPLOYMENT_OCID}" ]]; then
+  auth_method=instance_principal
+else
+  auth_method=resource_principal
 fi
 
-# Start Nginx and the VLLM API server
-echo "Starting Nginx and VLLM API server..."
-nginx -p $PWD && \
-source activate vllm && \
-WEB_CONCURRENCY=1 python $VLLM_DIR/vllm-api-server.py --port 80 --host 0.0.0.0 --log-config $VLLM_DIR/vllm-log-config.yaml $PARAMS
+if [ -n "\$BUCKET" ]; then
+  echo "BUCKET variable are set."
+  #oci os object sync --auth resource_principal --bucket-name genai --dest-dir /home/datascience/llma2/
+  /root/bin/oci os object sync --auth $auth_method --bucket-name $BUCKET --dest-dir /home/datascience/model/
+  MODEL="/home/datascience/model/$MODEL"  
+elif [ -n "\$TOKEN_FILE" ]; then
+  export HUGGING_FACE_HUB_TOKEN=$(cat $TOKEN_FILE)
+  echo "The md5 of token is $(md5sum $TOKEN_FILE)"
+  mkdir -p /home/datascience/.cache/huggingface
+  cp $TOKEN_FILE /home/datascience/.cache/huggingface/token
+  echo "Copied token file to /home/datascience/.cache/huggingface, $(md5sum /home/datascience/.cache/huggingface/token)"
+  echo "Set HuggingFace cache folder..."
+  export HUGGINGFACE_HUB_CACHE=/home/datascience/.cache
+  echo "The size of partitions"
+  echo $(df -h /home/datascience)
+  df -h
+  echo "Checking internet connection: "
+  curl -s --connect-timeout 15 http://example.com > /dev/null && echo "Connected" || echo "Not connected"
+  echo $(du -sh /home/datascience/*)
+else
+  echo "No bucket or authentication token is provided. Weights are assumed to be downloaded from OCI Model Catalog."
+fi
+
+echo "Starting vllm engine..."
+source activate vllm
+WEB_CONCURRENCY=1 python $VLLM_DIR/vllm-api-server.py --port ${PORT} --host 0.0.0.0 --log-config $VLLM_DIR/vllm-log-config.yaml --model ${MODEL} --tensor-parallel-size ${TENSOR_PARALLELISM}
 
 
 echo "Exiting vLLM. Here is the disk utilization of /home/datascience - "
